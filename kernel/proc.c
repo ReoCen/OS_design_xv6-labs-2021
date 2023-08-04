@@ -289,6 +289,8 @@ fork(void)
   }
   np->sz = p->sz;
 
+  np->tracemask = p->tracemask;  // copy trace mask
+  
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -652,5 +654,15 @@ procdump(void)
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
+  }
+}
+
+void procnum(uint64* result){
+  *result = 0;
+  // must use 'struct' in c
+  for (struct proc *p = proc;p < &proc[NPROC];p++){
+    if (p->state != UNUSED){
+      (*result)++;
+    }
   }
 }
