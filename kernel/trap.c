@@ -78,8 +78,20 @@ usertrap(void)
 
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
+  {
+    if(p->interval){
+  		//在进程的定时器间隔到期时，用户进程执行处理程序函数
+  		if(p->ticks == p->interval){
+  			// p->ticks = 0;
+        //防止重入函数
+  			p->trapframecopy = p->trapframe + 512;  
+  			memmove(p->trapframecopy, p->trapframe, sizeof(struct trapframe));
+  			p->trapframe->epc = p->handler; //epc代表异常程序计数器 ，使得处理器在从中断返回后，能够直接跳转到用户进程的定时器处理函数执行
+  		}
+  	p->ticks++;
+  	}
     yield();
-
+  }
   usertrapret();
 }
 
