@@ -67,6 +67,10 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  }else if(r_scause()==15 || r_scause()==13){ // 处理page fault
+  if(cowfault(p->pagetable,r_stval())<0){
+      p->killed = 1;
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -217,4 +221,36 @@ devintr()
     return 0;
   }
 }
+
+
+// 为cow page分配新页
+int 
+cowfault(pagetable_t pagetable, uint64 va)
+{
+  if(va >= MAXVA){
+    return -1;
+  }
+  pte_t *pte;
+  pte = walk(pagetable,va,0);
+  if(pte == 0 ) return -1;
+  if ((*pte & PTE_U) == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_COW) == 0){
+    return -1;
+  }
+  
+  uint64 pa1,pa2;
+  pa1 = PTE2PA(*pte);
+  pa2 = (uint64)kalloc();
+  if(pa2 == 0){
+    return -1;
+  }
+  memmove((char*)pa2,(char*)pa1,PGSIZE);
+  // 只有当引用计数为0的时候才会真正free
+  kfree((void*)pa1);
+  uint flags = PTE_FLAGS(*pte);
+  *pte = PA2PTE(pa2) | flags | PTE_W;
+  *pte &= ~PTE_COW;
+  return 0;
+
+}
+
 

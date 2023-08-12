@@ -455,7 +455,7 @@ class Runner():
 
             # Run and react
             self.gdb.cont()
-            self.__react(self.reactors, timeout)
+            self.__react(self.reactors, timeout+3000)
         finally:
             # Shutdown QEMU
             try:

@@ -303,7 +303,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -311,14 +311,26 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+
+    // 将父亲和孩子都置为写保护，并标识该页为cow
+    *pte &= ~PTE_W;
+    *pte |= PTE_COW;
+
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+
+    //引用计数++
+    incref(pa);
+    //直接把pa给孩子的页表项，也就是说现在父子的va都对应父亲的pa
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    // if((mem = kalloc()) == 0)
+    //   goto err;
+    // memmove(mem, (char*)pa, PGSIZE);
+    // if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+    //   // kfree(mem);
+    //   goto err;
+    // }
   }
   return 0;
 
@@ -353,6 +365,19 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+     pte_t *pte = walk(pagetable,va0,0);
+    if(pte == 0 || (*pte & PTE_V )==0 || (*pte & PTE_U) ==0){
+      return -1;
+    }
+    // 如果写保护，并且是因为COW造成的
+    if((*pte & PTE_W) == 0 && (*pte && PTE_COW) == 1){
+      // 为当前虚拟地址分配一个新的物理地址以供写入
+      if(cowfault(pagetable,va0)<0){
+        return -1;
+      }
+    }
+    pa0 = PTE2PA(*pte);
+    
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;

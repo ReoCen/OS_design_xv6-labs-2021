@@ -23,10 +23,19 @@ struct {
   struct run *freelist;
 } kmem;
 
+int refcount[PHYSTOP/PGSIZE];
+struct spinlock reflock;
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  char *p;
+  p = (char*)PGROUNDUP((uint64)end);
+  // 将引用计数数组初始化为1
+  for(; p + PGSIZE <= (char*)PHYSTOP; p += PGSIZE){
+     refcount[(uint64)p/ PGSIZE] = 1;
+  }
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -51,6 +60,20 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+   // 因为可能有多个进程引用了同一页面，所以这里要加锁
+  acquire(&kmem.lock);
+  int pn = (uint64) pa / PGSIZE;
+  if(refcount[pn]<1){
+    panic("kfree ref");
+  }
+  refcount[pn]-=1;
+  int tmp = refcount[pn];
+  release(&kmem.lock);
+  // 计数不为0说明还有进程需要这一页，不能free
+  if(tmp>0){
+    return;
+  }
+
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -73,10 +96,32 @@ kalloc(void)
   acquire(&kmem.lock);
   r = kmem.freelist;
   if(r)
+  {
     kmem.freelist = r->next;
+    int pn = (uint64)r / PGSIZE;
+    acquire(&reflock);
+    if(refcount[pn]!=0){
+      panic("kalloc ref");
+    }
+    refcount[pn] = 1;
+    release(&reflock);
+  }
+    
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+void 
+incref(uint64 pa)
+{
+  int pn = pa/PGSIZE;
+  acquire(&kmem.lock);
+  if(pa>=PHYSTOP || refcount[pn]<1){
+    panic("incref");
+  }
+  refcount[pn] += 1;
+  release(&kmem.lock);
 }
